@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo Blur + Overlay Editor</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:#0e0f12;color:#e6e7ea;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  header{padding:10px 16px;border-bottom:1px solid #22242a;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.02em;color:#9aa0ad}
+  main{flex:1;display:flex;min-height:0}
+  .panel{width:270px;flex:none;padding:14px;overflow-y:auto;border-right:1px solid #22242a;background:#12141a}
+  .stage{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto;position:relative;background:
+    repeating-conic-gradient(#15171d 0 25%,#1a1d24 0 50%) 0 0/24px 24px}
+  canvas{max-width:100%;max-height:100%;display:block;border-radius:6px;box-shadow:0 8px 30px rgba(0,0,0,.55);touch-action:none}
+  .grp{margin-bottom:16px}
+  .grp label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#7d8492;margin-bottom:6px}
+  input[type=file]{width:100%;font-size:11px;color:#9aa0ad}
+  input[type=file]::file-selector-button{background:#242832;color:#dfe2e8;border:1px solid #333844;border-radius:5px;
+    padding:6px 10px;font-size:11px;cursor:pointer;margin-right:8px}
+  input[type=file]::file-selector-button:hover{background:#2e333f}
+  input[type=range]{width:100%;accent-color:#5b8cff}
+  select{width:100%;background:#1a1d24;color:#dfe2e8;border:1px solid #2c313c;border-radius:5px;padding:6px}
+  .val{float:right;color:#5b8cff;font-variant-numeric:tabular-nums}
+  button{width:100%;padding:9px;border-radius:6px;border:1px solid #2c313c;background:#1a1d24;color:#dfe2e8;
+    font-size:12.5px;cursor:pointer;margin-bottom:8px}
+  button:hover{background:#232833}
+  button.primary{background:#2f5bd4;border-color:#3f6ae6;color:#fff;font-weight:600}
+  button.primary:hover{background:#3a68e8}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .row{display:flex;gap:8px}
+  .row button{margin-bottom:8px}
+  .hint{font-size:11px;color:#666e7d;line-height:1.45;margin-top:4px}
+  .badge{font-size:10px;padding:3px 8px;border-radius:99px;background:#1f2634;color:#6f9bff;border:1px solid #2b3category}
+  .stage.preview canvas{box-shadow:0 0 0 2px #5b8cff,0 8px 30px rgba(0,0,0,.55)}
+  hr{border:0;border-top:1px solid #22242a;margin:16px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>PHOTO BLUR + OVERLAY EDITOR</h1>
+  <span class="hint" id="status">Load a base photo to begin</span>
+</header>
+<main>
+  <aside class="panel">
+    <div class="grp">
+      <label>1. Base photo</label>
+      <input type="file" id="baseFile" accept="image/*">
+    </div>
+
+    <div class="grp">
+      <label>2. Blur base <span class="val" id="blurVal">0</span></label>
+      <input type="range" id="blur" min="0" max="60" value="0">
+    </div>
+
+    <hr>
+
+    <div class="grp">
+      <label>3. Overlay image</label>
+      <input type="file" id="overlayFile" accept="image/*">
+    </div>
+
+    <div class="grp">
+      <label>Overlay opacity <span class="val" id="opVal">60</span></label>
+      <input type="range" id="opacity" min="0" max="100" value="60">
+    </div>
+
+    <div class="grp">
+      <label>Blend mode</label>
+      <select id="blend">
+        <option value="source-over">Normal</option>
+        <option value="multiply">Multiply</option>
+        <option value="screen">Screen</option>
+        <option value="overlay">Overlay</option>
+        <option value="soft-light">Soft light</option>
+        <option value="color-dodge">Color dodge</option>
+        <option value="luminosity">Luminosity</option>
+        <option value="difference">Difference</option>
+      </select>
+    </div>
+
+    <div class="grp">
+      <label>Overlay size <span class="val" id="scaleVal">100</span></label>
+      <input type="range" id="scale" min="5" max="400" value="100">
+    </div>
+
+    <div class="grp">
+      <label>Rotation <span class="val" id="rotVal">0</span></label>
+      <input type="range" id="rotate" min="-180" max="180" value="0">
+    </div>
+
+    <div class="row">
+      <button id="centerBtn" disabled>Center</button>
+      <button id="clearBtn" disabled>Remove</button>
+    </div>
+
+    <hr>
+
+    <button id="previewBtn" disabled>Preview result</button>
+    <button id="saveBtn" class="primary" disabled>Download PNG</button>
+    <button id="resetBtn">Reset all</button>
+    <p class="hint">Drag the overlay directly on the canvas to position it. Everything stays on your device.</p>
+  </aside>
+
+  <section class="stage" id="stage">
+    <canvas id="c" width="900" height="600"></canvas>
+  </section>
+</main>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const stage = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const $ = id => document.getElementById(id);
+
+let base = null, overlay = null;
+let blur = 0, op = 0.6, scale = 1, rot = 0, ox = 0, oy = 0;
+let previewing = false, dragging = false, sx = 0, sy = 0, sox = 0, soy = 0;
+const MAXW = 1400;
+
+function setStatus(t){ statusEl.textContent = t; }
+function syncButtons(){
+  $('previewBtn').disabled = !base;
+  $('saveBtn').disabled = !base;
+  $('centerBtn').disabled = !overlay;
+  $('clearBtn').disabled = !overlay;
+}
+
+function drawCover(img, pad){
+  const W = canvas.width, H = canvas.height;
+  const s = Math.max((W + pad * 2) / img.width, (H + pad * 2) / img.height);
+  const w = img.width * s, h = img.height * s;
+  ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+}
+
+function render(){
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  if(!base){
+    ctx.fillStyle = '#1a1d24';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#5b6474';
+    ctx.font = '600 20px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Load a base photo', W / 2, H / 2);
+    return;
+  }
+
+  const b = blur * (W / 1200);
+  ctx.save();
+  ctx.filter = b > 0.2 ? `blur(${b}px)` : 'none';
+  drawCover(base, b * 2.2);
+  ctx.restore();
+
+  if(overlay){
+    const w = overlay.width * scale, h = overlay.height * scale;
+    ctx.save();
+    ctx.globalAlpha = op;
+    ctx.globalCompositeOperation = $('blend').value;
+    ctx.translate(W / 2 + ox, H / 2 + oy);
+    ctx.rotate(rot * Math.PI / 180);
+    ctx.drawImage(overlay, -w / 2, -h / 2, w, h);
+    ctx.restore();
+
+    if(!previewing){
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.translate(W / 2 + ox, H / 2 + oy);
+      ctx.rotate(rot * Math.PI / 180);
+      ctx.strokeStyle = 'rgba(91,140,255,.9)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 5]);
+      ctx.strokeRect(-w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+  }
+}
+
+function loadImage(file, cb){
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => cb(img);
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+$('baseFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  loadImage(f, img => {
+    base = img;
+    const r = Math.min(1, MAXW / Math.max(img.width, img.height));
+    canvas.width = Math.max(1, Math.round(img.width * r));
+    canvas.height = Math.max(1, Math.round(img.height * r));
+    overlay = null; ox = oy = 0; rot = 0; scale = 1;
+    $('rotate').value = 0; $('rotVal').textContent = '0';
+    $('scale').value = 100; $('scaleVal').textContent = '100';
+    setStatus(`${img.width}×${img.height} — drag overlay to position`);
+    syncButtons();
+    render();
+  });
+});
+
+$('overlayFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  loadImage(f, img => {
+    overlay = img;
+    const fit = (canvas.width * 0.45) / img.width;
+    scale = Math.min(fit, 2);
+    $('scale').value = Math.round(scale * 100);
+    $('scaleVal').textContent = Math.round(scale * 100);
+    ox = oy = 0;
+    setStatus('Overlay loaded — drag to place it');
+    syncButtons();
+    render();
+  });
+});
+
+$('blur').addEventListener('input', e => { blur = +e.target.value; $('blurVal').textContent = blur; render(); });
+$('opacity').addEventListener('input', e => { op = e.target.value / 100; $('opVal').textContent = e.target.value; render(); });
+$('scale').addEventListener('input', e => { scale = e.target.value / 100; $('scaleVal').textContent = e.target.value; render(); });
+$('rotate').addEventListener('input', e => { rot = +e.target.value; $('rotVal').textContent = rot; render(); });
+$('blend').addEventListener('change', render);
+
+$('centerBtn').addEventListener('click', () => { ox = oy = 0; render(); });
+$('clearBtn').addEventListener('click', () => {
+  overlay = null; $('overlayFile').value = ''; syncButtons(); render();
+});
+
+$('previewBtn').addEventListener('click', () => {
+  previewing = !previewing;
+  stage.classList.toggle('preview', previewing);
+  $('previewBtn').textContent = previewing ? 'Exit preview' : 'Preview result';
+  render();
+});
+
+$('saveBtn').addEventListener('click', () => {
+  canvas.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `edited-${Date.now()}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, 'image/png');
+});
+
+$('resetBtn').addEventListener('click', () => {
+  base = overlay = null; blur = 0; op = 0.6; scale = 1; rot = 0; ox = oy = 0;
+  previewing = false;
+  stage.classList.remove('preview');
+  $('previewBtn').textContent = 'Preview result';
+  $('blur').value = 0; $('blurVal').textContent = '0';
+  $('opacity').value = 60; $('opVal').textContent = '60';
+  $('scale').value = 100; $('scaleVal').textContent = '100';
+  $('rotate').value = 0; $('rotVal').textContent = '0';
+  $('baseFile').value = ''; $('overlayFile').value = '';
+  canvas.width = 900; canvas.height = 600;
+  setStatus('Load a base photo to begin');
+  syncButtons();
+  render();
+});
+
+canvas.addEventListener('pointerdown', e => {
+  if(!overlay || previewing) return;
+  dragging = true;
+  canvas.setPointerCapture(e.pointerId);
+  sx = e.clientX; sy = e.clientY; sox = ox; soy = oy;
+});
+canvas.addEventListener('pointermove', e => {
+  if(!dragging) return;
+  const k = canvas.width / canvas.getBoundingClientRect().width;
+  ox = sox + (e.clientX - sx) * k;
+  oy = soy + (e.clientY - sy) * k;
+  render();
+});
+canvas.addEventListener('pointerup', () => dragging = false);
+canvas.addEventListener('pointercancel', () => dragging = false);
+
+['dragover', 'drop'].forEach(t => stage.addEventListener(t, e => e.preventDefault()));
+stage.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if(!f || !f.type.startsWith('image/')) return;
+  const target = base ? 'overlayFile' : 'baseFile';
+  const dt = new DataTransfer();
+  dt.items.add(f);
+  $(target).files = dt.files;
+  $(target).dispatchEvent(new Event('change'));
+});
+
+render();
+syncButtons();
+</script>
+</body>
+</html>
