@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom';
-import { GlassButton, GlassCard, GlassInput, GlassMenu, GlassSegmented, GlassSheet, GlassSlider, GlassSwitch } from '@zakisheriff/liquid-glass';
+import { GlassButton, GlassCard, GlassInput, GlassMenu, GlassNav, GlassSegmented, GlassSheet, GlassSlider, GlassSwitch } from '@zakisheriff/liquid-glass';
 import { E, GROUPS, PRESETS, BLENDS, FONTS, EMOJI, RATIOS } from './engine.mjs';
 
 const h = React.createElement;
@@ -15,6 +15,7 @@ const P = {
   copy: ['M9 9h11v11H9z', 'M5 15H4V4h11v1'], wand: ['M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z'], trash: ['M3 6h18', 'M8 6V4h8v2', 'M6 6l1 14h10l1-14'],
   up: ['m18 15-6-6-6 6'], down: ['m6 9 6 6 6-6'], kbd: ['M2 6h20v12H2z', 'M6 10h.01', 'M10 10h.01', 'M14 10h.01', 'M18 10h.01', 'M7 14h10'],
   more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'], fit: ['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5'], crop: ['M6 2v14a2 2 0 0 0 2 2h14', 'M18 22V8a2 2 0 0 0-2-2H2'],
+  sliders: ['M4 21v-7', 'M4 10V3', 'M12 21v-9', 'M12 8V3', 'M20 21v-5', 'M20 12V3', 'M1 14h6', 'M9 8h6', 'M17 16h6'], layers: ['m12 2 10 5-10 5L2 7z', 'm2 17 10 5 10-5', 'm2 12 10 5 10-5'],
   compare: ['M12 3v18', 'M3 5h6v14H3z', 'M15 5h6v14h-6z'], moon: ['M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z']
 };
 const I = (n, s = 18) => h('svg', { width: s, height: s, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }, ...P[n].map((d, i) => h('path', { key: i, d })));
@@ -38,7 +39,7 @@ function EditPanel({ fileRef }) {
     Sec('Adjust', h('canvas', { ref: hcRef, className: 'histo', width: 256, height: 70, 'aria-label': 'Histogram' }),
       h('div', { className: 'row' }, h(GlassButton, { icon: I('wand'), variant: 'tinted', onClick: E.autoEnhance }, 'Auto enhance'), h(GlassButton, { onClick: E.resetAdj }, 'Reset')),
       h(GlassSegmented, { options: names, value: g, onChange: setG, size: 'sm', 'aria-label': 'Adjustment group' }),
-      h('div', { className: 'tile' }, GROUPS[names[g]].map(([k, n, a, b]) => Sl(n, A[k], a, b, v => E.adj(k, v))))),
+      h('div', { className: 'tile' }, GROUPS[names[g]].map(([k, n, a, b]) => Sl(n, A[k], a, b, v => E.adj(k, v))), names[g] === 'Lens' && [Col('Duotone shadows', S.duo[0], v => E.setDuo(0, v)), Col('Duotone lights', S.duo[1], v => E.setDuo(1, v)), Col('Border color', S.bcol, E.setBorderColor)])),
     h('p', { className: 'hint' }, 'Tip: paste or drop images anywhere. Everything stays on your device.'));
 }
 
@@ -90,29 +91,43 @@ function Help({ open, onClose }) {
   return h(GlassSheet, { open, onClose, 'aria-label': 'Keyboard shortcuts' }, h('div', { className: 'sheet' }, h('h2', null, 'Shortcuts'), ...K.map(([a, b]) => h('div', { className: 'sw', key: a }, h('span', null, b), h('kbd', null, a)))));
 }
 
+const MQ = '(max-width: 900px)';
 function App() {
-  const [, f] = useState(0), [tab, setTab] = useState(0), [pv, setPv] = useState(false), [help, setHelp] = useState(false), [dark, setDark] = useState(matchMedia('(prefers-color-scheme: dark)').matches);
+  const [, f] = useState(0), [tab, setTab] = useState(0), [pv, setPv] = useState(false), [help, setHelp] = useState(false), [shut, setShut] = useState(false);
+  const [dark, setDark] = useState(matchMedia('(prefers-color-scheme: dark)').matches), [mob, setMob] = useState(matchMedia(MQ).matches);
   const cvRef = useRef(), stRef = useRef(), fileRef = useRef(), imgRef = useRef();
-  useEffect(() => { E.onSelect = () => setTab(1); const off = E.on(() => f(x => x + 1)); E.init(cvRef.current, stRef.current, null); return off; }, []);
-  const has = E.has;
+  useEffect(() => {
+    E.onSelect = () => { setTab(1); setShut(false); }; const m = matchMedia(MQ), fn = () => setMob(m.matches); m.addEventListener('change', fn);
+    const off = E.on(() => f(x => x + 1)); E.init(cvRef.current, stRef.current, null); return () => { off(); m.removeEventListener('change', fn); };
+  }, []);
+  const has = E.has, toggleDark = v => { setDark(v); E.theme(v); };
+  const menu = [...(mob ? [{ label: 'Preview & export', icon: I('download', 16), onSelect: () => setPv(true), disabled: !has }, { label: 'Before / after split', icon: I('compare', 16), onSelect: E.toggleSplit, disabled: !has }, { label: dark ? 'Light mode' : 'Dark mode', icon: I('moon', 16), onSelect: () => toggleDark(!dark) }] : []),
+    { label: 'Copy to clipboard', icon: I('copy', 16), onSelect: E.copy, disabled: !has }, { label: 'Keyboard shortcuts', icon: I('kbd', 16), onSelect: () => setHelp(true) }];
+  const scroll = h('div', { className: 'scroll' }, h('div', { style: { display: tab === 0 ? 'block' : 'none' } }, h(EditPanel, { fileRef })), h('div', { style: { display: tab === 1 ? 'block' : 'none' } }, h(LayersPanel, { imgRef })));
+  const splitBtn = h(GlassButton, { size: 'sm', icon: I('compare'), variant: E.split != null ? 'tinted-filled' : 'glass', 'aria-label': 'Before and after split', onClick: E.toggleSplit });
   return h(React.Fragment, null,
     h('input', { ref: fileRef, type: 'file', accept: 'image/*', hidden: true, onChange: e => { E.openBase(e.target.files[0]); e.target.value = ''; } }),
     h('input', { ref: imgRef, type: 'file', accept: 'image/*', hidden: true, onChange: e => { E.openOverlay(e.target.files[0]); e.target.value = ''; } }),
     h('header', null, h('div', { className: 'brand' }, h('span', { className: 'logo' }), h('b', null, 'Photo Studio')),
       h('div', { className: 'hl' }, h(GlassButton, { icon: I('undo'), 'aria-label': 'Undo', disabled: !E.canUndo, onClick: E.undo }), h(GlassButton, { icon: I('redo'), 'aria-label': 'Redo', disabled: !E.canRedo, onClick: E.redo })),
-      h('div', { className: 'hc' }, h(GlassSegmented, { options: ['Edit', 'Layers'], value: tab, onChange: setTab, 'aria-label': 'Panel' })),
-      h('div', { className: 'hr' }, h(GlassSwitch, { checked: dark, onChange: v => { setDark(v); E.theme(v); }, tint: '#5b47f5', 'aria-label': 'Dark mode' }),
-        h(GlassButton, { icon: I('compare'), variant: E.cmp ? 'tinted-filled' : 'glass', disabled: !has, onPointerDown: () => E.hold(true), 'aria-label': 'Hold to compare' }),
-        h(GlassButton, { disabled: !has, onClick: () => setPv(true) }, 'Preview'), h(GlassButton, { variant: 'filled', icon: I('download'), disabled: !has, onClick: E.quickSave }, 'Download'),
-        h(GlassMenu, { icon: I('more'), 'aria-label': 'More', items: [{ label: 'Copy to clipboard', icon: I('copy', 16), onSelect: E.copy, disabled: !has }, { label: 'Keyboard shortcuts', icon: I('kbd', 16), onSelect: () => setHelp(true) }] }))),
+      !mob && h('div', { className: 'hc' }, h(GlassSegmented, { options: ['Edit', 'Layers'], value: tab, onChange: setTab, 'aria-label': 'Panel' })),
+      h('div', { className: 'hr' }, !mob && h(GlassSwitch, { checked: dark, onChange: toggleDark, tint: '#5b47f5', 'aria-label': 'Dark mode' }),
+        h(GlassButton, { icon: I('compare'), variant: E.cmp ? 'tinted-filled' : 'glass', disabled: !has, onPointerDown: () => E.hold(true), 'aria-label': 'Hold to compare with original' }),
+        !mob && h(GlassButton, { disabled: !has, onClick: () => setPv(true) }, 'Preview'),
+        mob ? h(GlassButton, { variant: 'filled', icon: I('download'), 'aria-label': 'Download', disabled: !has, onClick: E.quickSave }) : h(GlassButton, { variant: 'filled', icon: I('download'), disabled: !has, onClick: E.quickSave }, 'Download'),
+        h(GlassMenu, { icon: I('more'), 'aria-label': 'More', items: menu }))),
     h('main', null,
       h('section', { className: 'stage', ref: stRef },
         h('canvas', { ref: cvRef, width: 900, height: 600, tabIndex: 0, 'aria-label': 'Photo canvas', className: has ? '' : 'gone' }),
-        !has && h(GlassCard, { className: 'empty', padding: '36px 28px', radius: '30px' }, h('div', { className: 'ring' }), h('h2', null, 'Drop a photo to start'), h('p', null, 'Or paste one from your clipboard. Your images never leave this device.'), h(GlassButton, { variant: 'filled', size: 'lg', onClick: pickFile(fileRef) }, 'Choose photo'))),
-      h(GlassCard, { className: 'side', padding: '6px', radius: '28px' }, h('div', { className: 'scroll' }, h('div', { style: { display: tab === 0 ? 'block' : 'none' } }, h(EditPanel, { fileRef })), h('div', { style: { display: tab === 1 ? 'block' : 'none' } }, h(LayersPanel, { imgRef }))))),
-    h(GlassCard, { className: 'bar', padding: '6px 10px', radius: '99px' }, h(GlassButton, { size: 'sm', icon: I('minus'), 'aria-label': 'Zoom out', onClick: () => E.setZoom(E.zoom / 1.2) }),
+        !has && h(GlassCard, { className: 'empty', padding: '32px 24px', radius: '30px' }, h('div', { className: 'ring' }), h('h2', null, 'Drop a photo to start'), h('p', null, 'Or paste one from your clipboard. Your images never leave this device.'), h(GlassButton, { variant: 'filled', size: 'lg', onClick: pickFile(fileRef) }, 'Choose photo'))),
+      !mob && h(GlassCard, { className: 'side', padding: '6px', radius: '28px' }, scroll)),
+    mob ? h('div', { className: 'dock' },
+      h('div', { className: 'mbar' }, h(GlassButton, { size: 'sm', icon: I('fit'), 'aria-label': 'Fit to screen', onClick: () => E.setZoom(1) }), splitBtn, h('span', { className: 'info' }, has ? E.info.split(' · ')[0] : ''), h('span', { className: 'sp' }), h(GlassButton, { size: 'sm', icon: I(shut ? 'up' : 'down'), 'aria-label': shut ? 'Show tools' : 'Hide tools', onClick: () => setShut(!shut) })),
+      h('div', { className: 'dpanel' + (shut ? ' shut' : '') }, h(GlassCard, { className: 'side', padding: '6px', radius: '26px' }, scroll)),
+      h(GlassNav, { items: [{ label: 'Edit', icon: I('sliders', 22) }, { label: 'Layers', icon: I('layers', 22) }], activeIndex: tab, onChange: i => { setTab(i); setShut(false); }, showLabels: true }))
+    : h(GlassCard, { className: 'bar', padding: '6px 10px', radius: '99px' }, h(GlassButton, { size: 'sm', icon: I('minus'), 'aria-label': 'Zoom out', onClick: () => E.setZoom(E.zoom / 1.2) }),
       h('div', { className: 'zs' }, h(GlassSlider, { value: Math.round(E.zoom * 100), min: 25, max: 400, step: 1, onChange: v => E.setZoom(v / 100), 'aria-label': 'Zoom' })),
-      h(GlassButton, { size: 'sm', icon: I('plus'), 'aria-label': 'Zoom in', onClick: () => E.setZoom(E.zoom * 1.2) }), h(GlassButton, { size: 'sm', icon: I('fit'), 'aria-label': 'Fit', onClick: () => E.setZoom(1) }), h('span', { className: 'info' }, E.info)),
+      h(GlassButton, { size: 'sm', icon: I('plus'), 'aria-label': 'Zoom in', onClick: () => E.setZoom(E.zoom * 1.2) }), h(GlassButton, { size: 'sm', icon: I('fit'), 'aria-label': 'Fit', onClick: () => E.setZoom(1) }), splitBtn, h('span', { className: 'info' }, E.info)),
     h(PreviewSheet, { open: pv, onClose: () => setPv(false) }), h(Help, { open: help, onClose: () => setHelp(false) }),
     h('div', { id: 'toast', className: E.msg ? 'show' : '' }, E.msg));
 }

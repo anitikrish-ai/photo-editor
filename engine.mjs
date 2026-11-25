@@ -3,30 +3,32 @@ export const GROUPS = {
   Light: [['exp','Exposure',-100,100,0],['bright','Brightness',0,200,100],['contrast','Contrast',0,200,100],['hi','Highlights',-100,100,0],['sh','Shadows',-100,100,0]],
   Color: [['sat','Saturation',0,200,100],['vib','Vibrance',-100,100,0],['temp','Temperature',-100,100,0],['tint','Tint',-100,100,0],['hue','Hue',-180,180,0]],
   Detail: [['sharp','Sharpen',0,100,0],['blur','Blur',0,60,0],['grain','Film grain',0,100,0],['vig','Vignette',0,100,0],['fade','Fade',0,100,0]],
-  FX: [['sepia','Sepia',0,100,0],['gray','Grayscale',0,100,0],['inv','Invert',0,100,0],['pix','Pixelate',0,100,0]]
+  FX: [['sepia','Sepia',0,100,0],['gray','Grayscale',0,100,0],['inv','Invert',0,100,0],['pix','Pixelate',0,100,0],['chroma','Glitch split',0,100,0]],
+  Lens: [['tilt','Tilt-shift',0,100,0],['glow','Glow',0,100,0],['duo','Duotone',0,100,0],['bord','Border',0,100,0]]
 };
-export const PRESETS = {Original:{},Vivid:{contrast:115,sat:150,bright:104,vib:20},Noir:{gray:100,contrast:130,vig:45,bright:95},Warm:{sepia:30,sat:120,temp:35,bright:105},Cool:{temp:-35,sat:92,contrast:108},Fade:{contrast:85,bright:112,sat:80,fade:35,grain:25},Dream:{blur:6,bright:112,sat:115,vig:20,exp:10},Cinema:{contrast:125,sat:85,vig:55,grain:30,bright:92,temp:-12},Retro:{sepia:55,contrast:110,grain:45,vig:35},Crisp:{sharp:60,contrast:115,vib:25},Matte:{fade:45,contrast:90,sat:90},Sunset:{temp:45,tint:12,sat:125,vig:30,sh:20}};
+export const PRESETS = {Original:{},Vivid:{contrast:115,sat:150,bright:104,vib:20},Noir:{gray:100,contrast:130,vig:45,bright:95},Warm:{sepia:30,sat:120,temp:35,bright:105},Cool:{temp:-35,sat:92,contrast:108},Fade:{contrast:85,bright:112,sat:80,fade:35,grain:25},Dream:{blur:6,bright:112,sat:115,vig:20,exp:10},Cinema:{contrast:125,sat:85,vig:55,grain:30,bright:92,temp:-12},Retro:{sepia:55,contrast:110,grain:45,vig:35},Crisp:{sharp:60,contrast:115,vib:25},Matte:{fade:45,contrast:90,sat:90},Sunset:{temp:45,tint:12,sat:125,vig:30,sh:20},Neon:{duo:70,contrast:118,glow:45,sat:130},Dreamy:{glow:60,bright:108,sat:112,fade:15,blur:2},Toy:{tilt:65,sat:135,contrast:112,vib:20},Glitch:{chroma:55,contrast:115,sat:120,grain:25},Polaroid:{bord:30,fade:30,temp:18,vig:22}};
 export const BLENDS = [['source-over','Normal'],['multiply','Multiply'],['screen','Screen'],['overlay','Overlay'],['soft-light','Soft light'],['hard-light','Hard light'],['color-dodge','Color dodge'],['color-burn','Color burn'],['lighten','Lighten'],['darken','Darken'],['luminosity','Luminosity'],['color','Color'],['difference','Difference'],['exclusion','Exclusion']];
 export const FONTS = ['system-ui','Georgia','Impact','Courier New','Trebuchet MS','Brush Script MT','Arial Black'];
 export const EMOJI = ['😀','😍','🔥','✨','❤️','⭐','🌈','🎉','😎','🌸','☀️','🌙'];
 export const RATIOS = [['Free',0],['1:1',1],['4:5',.8],['16:9',1.7778],['9:16',.5625],['3:2',1.5]];
 const DEF = Object.fromEntries(Object.values(GROUPS).flat().map(s => [s[0], s[4]]));
-const PXK = ['exp','hi','sh','vib','temp','tint','sharp','fade'];
+const PXK = ['exp','hi','sh','vib','temp','tint','sharp','fade','chroma','duo'];
+const MAXP = matchMedia('(pointer:coarse)').matches ? 1280 : 2000;
 
 let S = fresh(), imgs = new Map(), baseImg = null, bc = null, crop = null, cv, ctx, stage, hc;
-let LW = 900, LH = 600, hist = [], hi = -1, raf = 0, drag = null, guides = {}, uid = 1, noise = null, cmp = false, fr0 = null, frK = '', ct = 0;
-function fresh() { return { adj: { ...DEF }, rot: 0, ang: 0, fx: false, ar: 0, layers: [], sel: null }; }
+let pinch = false, LW = 900, LH = 600, hist = [], hi = -1, raf = 0, drag = null, guides = {}, uid = 1, noise = null, cmp = false, fr0 = null, frK = '', ct = 0;
+function fresh() { return { duo: ['#2b1055', '#ffb86b'], bcol: '#ffffff', adj: { ...DEF }, rot: 0, ang: 0, fx: false, ar: 0, layers: [], sel: null }; }
 
 const subs = new Set();
 export const E = {
   get S() { return S; }, tool: 'move', brush: { size: 28, color: '#ff3b6b', erase: false },
-  zoom: 1, ES: { f: 'image/png', q: 92, z: 1 }, msg: '', cmp: false,
+  split: null, zoom: 1, ES: { f: 'image/png', q: 92, z: 1 }, msg: '', cmp: false,
   get has() { return !!bc; }, get info() { return bc ? `${LW}×${LH}px canvas · ${baseImg.width}×${baseImg.height} source` : 'Open a photo to begin'; },
   get canUndo() { return hi > 0; }, get canRedo() { return hi < hist.length - 1; },
   get cur() { return cur(); },
   on(f) { subs.add(f); return () => subs.delete(f); }
 };
-const emit = () => subs.forEach(f => f());
+let er = 0; const emit = () => { if (!er) er = requestAnimationFrame(() => { er = 0; subs.forEach(f => f()); }); };
 const cur = () => S.layers.find(l => l.id === S.sel);
 const sched = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(ctx, 1, true); histo(); }); };
 const upd = () => { sched(); emit(); };
@@ -48,12 +50,12 @@ function baseCanvas(max) {
   x.imageSmoothingQuality = 'high'; x.translate(w / 2, h / 2); x.rotate(S.rot * Math.PI / 2 + S.ang * Math.PI / 180); x.scale(sc * (S.fx ? -1 : 1), sc); x.drawImage(baseImg, -iw / 2, -ih / 2, iw, ih); return c;
 }
 const cropOf = (w, h) => { let cw = w, ch = h; if (S.ar > 0) { if (cw / ch > S.ar) cw = ch * S.ar; else ch = cw / S.ar; } return { x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch }; };
-function rebuild() { bc = baseImg ? baseCanvas(2400) : null; sizeCanvas(); }
+function rebuild() { bc = baseImg ? baseCanvas(Math.round(MAXP * 1.2)) : null; sizeCanvas(); }
 function sizeCanvas() {
-  if (!bc) { LW = 900; LH = 600; crop = null; } else { crop = cropOf(bc.width, bc.height); const k = Math.min(1, 2000 / Math.max(crop.w, crop.h)); LW = Math.round(crop.w * k); LH = Math.round(crop.h * k); }
+  if (!bc) { LW = 900; LH = 600; crop = null; } else { crop = cropOf(bc.width, bc.height); const k = Math.min(1, MAXP / Math.max(crop.w, crop.h)); LW = Math.round(crop.w * k); LH = Math.round(crop.h * k); }
   if (cv) { cv.width = LW; cv.height = LH; } layout(); sched(); emit();
 }
-const fit = () => Math.min((stage.clientWidth - 96) / LW, (stage.clientHeight - 96) / LH, 4);
+const fit = () => { const p = innerWidth < 900 ? 28 : 96; return Math.min((stage.clientWidth - p) / LW, (stage.clientHeight - p) / LH, 4); };
 function layout() { if (!cv) return; const f = fit() * E.zoom; cv.style.width = LW * f + 'px'; cv.style.height = LH * f + 'px'; }
 
 /* ---- pixel adjustments (exposure, tone, white balance, vibrance, sharpen, pixelate) ---- */
@@ -65,19 +67,32 @@ function px(c, A) {
     c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.imageSmoothingEnabled = false; c.clearRect(0, 0, W, H); c.drawImage(t, 0, 0, t.width, t.height, 0, 0, t.width * b, t.height * b); c.restore();
   }
   if (!PXK.some(k => A[k])) return;
-  const id = c.getImageData(0, 0, W, H), d = id.data, m = Math.pow(2, A.exp / 50), tr = 1 + A.temp / 350, tb = 1 - A.temp / 350, tg = 1 - A.tint / 300, f = A.fade / 100;
+  const hx = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)), d1 = hx(S.duo[0]), d2 = hx(S.duo[1]), du = A.duo / 100, id = c.getImageData(0, 0, W, H), d = id.data, m = Math.pow(2, A.exp / 50), tr = 1 + A.temp / 350, tb = 1 - A.temp / 350, tg = 1 - A.tint / 300, f = A.fade / 100;
   for (let i = 0; i < d.length; i += 4) {
     let r = d[i] * m * tr, g = d[i + 1] * m * tg, b = d[i + 2] * m * tb;
     const l = Math.min(1, Math.max(0, (.2126 * r + .7152 * g + .0722 * b) / 255)), a = (1 - l) * (1 - l) * A.sh * .6 + l * l * A.hi * .6; r += a; g += a; b += a;
     if (A.vib) { const av = (r + g + b) / 3, s = A.vib / 100 * (1 - (Math.max(r, g, b) - Math.min(r, g, b)) / 255) * 1.5; r += (r - av) * s; g += (g - av) * s; b += (b - av) * s; }
     if (f) { r = r * (1 - f * .25) + f * 45; g = g * (1 - f * .25) + f * 45; b = b * (1 - f * .25) + f * 45; }
+    if (du) { const q = (.2126 * r + .7152 * g + .0722 * b) / 255; r = r * (1 - du) + (d1[0] + (d2[0] - d1[0]) * q) * du; g = g * (1 - du) + (d1[1] + (d2[1] - d1[1]) * q) * du; b = b * (1 - du) + (d1[2] + (d2[2] - d1[2]) * q) * du; }
     d[i] = r; d[i + 1] = g; d[i + 2] = b;
   }
+  if (A.chroma > 0) { const s = d.slice(), sh = Math.max(1, Math.round(A.chroma / 100 * W / 45)); for (let y = 0; y < H; y++) { const row = y * W; for (let x = 0; x < W; x++) { const i = (row + x) * 4; d[i] = s[(row + Math.max(0, x - sh)) * 4]; d[i + 2] = s[(row + Math.min(W - 1, x + sh)) * 4 + 2]; } } }
   if (A.sharp > 0) {
     const s = d.slice(), a = A.sharp / 100 * 1.1, W4 = W * 4;
     for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = (y * W + x) * 4; for (let k = 0; k < 3; k++) d[i + k] = s[i + k] * (1 + 4 * a) - a * (s[i + k - 4] + s[i + k + 4] + s[i + k - W4] + s[i + k + W4]); }
   }
   c.putImageData(id, 0, 0);
+}
+function tiltShift(c, A) {
+  const W = c.canvas.width, H = c.canvas.height, t = document.createElement('canvas'); t.width = W; t.height = H; const x = t.getContext('2d');
+  x.filter = `blur(${A.tilt / 100 * W / 70}px)`; x.drawImage(c.canvas, 0, 0); x.filter = 'none'; x.globalCompositeOperation = 'destination-in';
+  const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#000'); g.addColorStop(.3, 'rgba(0,0,0,0)'); g.addColorStop(.7, 'rgba(0,0,0,0)'); g.addColorStop(1, '#000'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(t, 0, 0); c.restore();
+}
+function glow(c, A) {
+  const W = c.canvas.width, H = c.canvas.height, t = document.createElement('canvas'); t.width = W; t.height = H; const x = t.getContext('2d');
+  x.filter = `blur(${W / 45}px) brightness(1.25) saturate(1.2)`; x.drawImage(c.canvas, 0, 0);
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalCompositeOperation = 'screen'; c.globalAlpha = A.glow / 100 * .85; c.drawImage(t, 0, 0); c.restore();
 }
 function histo() {
   const hc = E.hc; if (!hc || !bc) return; const t = histo.t || (histo.t = document.createElement('canvas')); t.width = 128; t.height = 80;
@@ -120,15 +135,19 @@ function draw(c, k, ui, ky = k) {
     c.filter = f.length ? f.join(' ') : 'none';
   }
   c.drawImage(bc, crop.x, crop.y, crop.w, crop.h, -pad, -pad, LW + pad * 2, LH + pad * 2); c.restore();
-  if (cmp) return; px(c, A);
+  if (cmp) return; px(c, A); if (A.tilt > 0) tiltShift(c, A); if (A.glow > 0) glow(c, A);
   if (A.vig > 0) { const g = c.createRadialGradient(LW / 2, LH / 2, Math.min(LW, LH) * .25, LW / 2, LH / 2, Math.hypot(LW, LH) / 2); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${A.vig / 100 * .92})`); c.fillStyle = g; c.fillRect(0, 0, LW, LH); }
   if (A.grain > 0) { c.save(); c.globalAlpha = A.grain / 100 * .55; c.globalCompositeOperation = 'overlay'; c.fillStyle = grain(); c.fillRect(0, 0, LW, LH); c.restore(); }
-  S.layers.forEach(L => drawLayer(c, L)); if (ui) drawUI(c);
+  S.layers.forEach(L => drawLayer(c, L));
+  if (A.bord > 0) { const lw = A.bord / 100 * Math.min(LW, LH) * .24; c.save(); c.strokeStyle = S.bcol; c.lineWidth = lw; c.strokeRect(lw / 2, lw / 2, LW - lw, LH - lw); c.restore(); }
+  if (ui) drawUI(c);
 }
 const kv = () => LW / cv.getBoundingClientRect().width;
 function corners(L) { const d = dims(L), r = L.r * Math.PI / 180, co = Math.cos(r), si = Math.sin(r), cx = LW / 2 + L.x, cy = LH / 2 + L.y, p = (x, y) => [cx + (x * co - y * si) * L.s, cy + (x * si + y * co) * L.s], w = d.w / 2, h = d.h / 2; return { c: [p(-w, -h), p(w, -h), p(w, h), p(-w, h)], rot: p(0, -h - 34 * kv() / L.s), top: p(0, -h), cx, cy }; }
 function drawUI(c) {
   const k = kv();
+  if (E.split != null) { const x = LW * E.split; c.save(); c.beginPath(); c.rect(0, 0, x, LH); c.clip(); c.filter = 'none'; c.drawImage(bc, crop.x, crop.y, crop.w, crop.h, 0, 0, LW, LH); c.restore();
+    c.save(); c.fillStyle = '#fff'; c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 6 * k; c.fillRect(x - 1.5 * k, 0, 3 * k, LH); c.beginPath(); c.arc(x, LH / 2, 16 * k, 0, 7); c.fill(); c.shadowBlur = 0; c.fillStyle = '#333'; c.font = `700 ${13 * k}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('↔', x, LH / 2); c.restore(); }
   if (drag && drag.mode === 'move') { c.save(); c.strokeStyle = 'rgba(255,70,140,.9)'; c.lineWidth = 1.2 * k; c.setLineDash([6 * k, 4 * k]); if (guides.x) { c.beginPath(); c.moveTo(LW / 2, 0); c.lineTo(LW / 2, LH); c.stroke(); } if (guides.y) { c.beginPath(); c.moveTo(0, LH / 2); c.lineTo(LW, LH / 2); c.stroke(); } c.restore(); }
   const L = cur(); if (!L || L.vis === false || E.tool === 'brush') return; const g = corners(L);
   c.save(); c.strokeStyle = '#4f7cff'; c.lineWidth = 1.6 * k; c.beginPath(); g.c.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath(); c.stroke();
@@ -151,7 +170,8 @@ function brushStart(p) {
 }
 function eyedrop(p) { const t = document.createElement('canvas'); t.width = t.height = 1; const x = t.getContext('2d'); x.drawImage(cv, -p[0], -p[1]); const d = x.getImageData(0, 0, 1, 1).data; E.brush.color = '#' + [...d].slice(0, 3).map(v => v.toString(16).padStart(2, '0')).join(''); E.tool = 'brush'; upd(); }
 function onDown(e) {
-  if (!bc || e.button || drag) return; cv.focus({ preventScroll: true }); const p = pt(e), k = kv(), L = cur(); cv.setPointerCapture(e.pointerId);
+  if (!bc || e.button || drag || pinch) return; cv.focus({ preventScroll: true }); const p = pt(e), k = kv(), L = cur(); cv.setPointerCapture(e.pointerId);
+  if (E.split != null && Math.abs(p[0] - LW * E.split) < 22 * k) { drag = { mode: 'split' }; return; }
   if (E.tool === 'eyedrop') return eyedrop(p);
   if (E.tool === 'brush') { brushStart(p); return; }
   if (L && L.vis !== false) { const g = corners(L), hr = 14 * k;
@@ -162,20 +182,31 @@ function onDown(e) {
   upd();
 }
 function onMove(e) {
-  if (!drag) return; const p = pt(e), L = cur(), k = kv(); if (!L) return;
+  if (!drag || pinch) return; const p = pt(e), L = cur(), k = kv();
+  if (drag.mode === 'split') { E.split = Math.min(1, Math.max(0, p[0] / LW)); sched(); return; }
+  if (!L) return;
   if (drag.mode === 'brush') { stroke(L, drag.last, p); drag.last = p; sched(); return; }
   if (drag.mode === 'move') { let x = drag.x0 + p[0] - drag.px, y = drag.y0 + p[1] - drag.py; const th = 7 * k; guides.x = Math.abs(x) < th; guides.y = Math.abs(y) < th; if (guides.x) x = 0; if (guides.y) y = 0; L.x = x; L.y = y; }
   else if (drag.mode === 'scale') L.s = Math.min(8, Math.max(.03, drag.s0 * Math.hypot(p[0] - LW / 2 - L.x, p[1] - LH / 2 - L.y) / drag.d0));
   else { let a = Math.atan2(p[1] - LH / 2 - L.y, p[0] - LW / 2 - L.x) * 180 / Math.PI + 90; a = ((a + 180) % 360 + 360) % 360 - 180; const n = Math.round(a / 45) * 45; if (Math.abs(a - n) < 3) a = n; L.r = Math.round(a * 10) / 10; }
   upd();
 }
-function onUp() { if (drag) { drag = null; guides = {}; cv.style.cursor = ''; commit(); upd(); } }
+function onUp() { if (drag) { const m = drag.mode; drag = null; guides = {}; cv.style.cursor = ''; if (m !== 'split') commit(); upd(); } }
 
 /* ---- API ---- */
 E.init = (canvas, st, histCanvas) => {
   cv = canvas; ctx = cv.getContext('2d'); stage = st; E.hc = E.hc || histCanvas;
   cv.addEventListener('pointerdown', onDown); cv.addEventListener('pointermove', onMove); cv.addEventListener('pointerup', onUp); cv.addEventListener('pointercancel', onUp);
   stage.addEventListener('wheel', e => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); E.setZoom(E.zoom * (e.deltaY < 0 ? 1.1 : .9)); }, { passive: false });
+  const tp = new Map(); let pd = 0, pm = null;
+  stage.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') return; tp.set(e.pointerId, [e.clientX, e.clientY]); if (tp.size === 2) { pinch = true; if (drag) { drag = null; commit(); } pd = 0; pm = null; } }, true);
+  stage.addEventListener('pointermove', e => {
+    if (!tp.has(e.pointerId)) return; tp.set(e.pointerId, [e.clientX, e.clientY]); if (tp.size !== 2) return;
+    const [a, b] = [...tp.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    if (pd) E.setZoom(E.zoom * d / pd); if (pm) { stage.scrollLeft -= m[0] - pm[0]; stage.scrollTop -= m[1] - pm[1]; } pd = d; pm = m;
+  }, true);
+  const tend = e => { tp.delete(e.pointerId); if (tp.size < 2) { pd = 0; pm = null; } if (!tp.size) pinch = false; };
+  stage.addEventListener('pointerup', tend, true); stage.addEventListener('pointercancel', tend, true);
   new ResizeObserver(layout).observe(stage);
   addEventListener('dragover', e => e.preventDefault()); addEventListener('drop', e => { e.preventDefault(); [...e.dataTransfer.files].forEach(intake); });
   addEventListener('paste', e => { for (const it of e.clipboardData.items) if (it.type.startsWith('image/')) intake(it.getAsFile()); });
@@ -183,6 +214,8 @@ E.init = (canvas, st, histCanvas) => {
   hist = [snap()]; hi = 0; sizeCanvas();
 };
 E.setZoom = z => { E.zoom = Math.min(4, Math.max(.25, z)); layout(); emit(); };
+E.toggleSplit = () => { if (!bc) return toast('Open a photo first'); E.split = E.split == null ? .5 : null; upd(); };
+E.setDuo = (i, v) => { S.duo[i] = v; upd(); commitSoon(); }; E.setBorderColor = v => { S.bcol = v; upd(); commitSoon(); };
 E.hold = v => { if (!bc) return; cmp = E.cmp = v; sched(); emit(); };
 function loadFile(f, cb) { if (!f || !f.type.startsWith('image/')) return; const u = URL.createObjectURL(f), i = new Image(); i.onload = () => { cb(i); setTimeout(() => URL.revokeObjectURL(u), 3000); }; i.onerror = () => { toast('Could not read that image'); cb(null); }; i.src = u; }
 function setBase(i) { if (!i) return; baseImg = i; S = fresh(); imgs.clear(); fr0 = null; rebuild(); hist = []; hi = -1; commit(); E.zoom = 1; layout(); upd(); toast('Photo loaded'); }
