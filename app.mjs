@@ -24,22 +24,35 @@ const Sw = (label, on, fn) => h('div', { className: 'sw', key: label }, h('span'
 const Pick = (label, value, items, fn) => h('div', { className: 'sw', key: label }, h('span', null, label, h('b', { className: 'cur' }, value)), h(GlassMenu, { icon: I('down', 16), size: 'sm', 'aria-label': label, items: items.map(([v, n]) => ({ label: n, checked: n === value, onSelect: () => fn(v) })) }));
 const Col = (label, value, fn) => h('label', { className: 'sw', key: label }, h('span', null, label), h('input', { type: 'color', value, onChange: e => fn(e.target.value) }));
 const Sec = (t, ...c) => h('section', { className: 'sec', key: t }, h('h3', null, t), ...c);
+const MODES = ['paint', 'erase', 'mosaic', 'blur'];
+const CR = [0, 1, .8, 1.7778, 1.5];
 const pickFile = ref => () => ref.current && ref.current.click();
 
 function EditPanel({ fileRef }) {
-  const [g, setG] = useState(0), S = E.S, names = Object.keys(GROUPS), A = S.adj, hcRef = useRef();
+  const [tol, setTol] = useState(36), [g, setG] = useState(0), S = E.S, names = Object.keys(GROUPS), A = S.adj, hcRef = useRef();
   useEffect(() => { E.hc = hcRef.current; E.initHist && E.initHist(hcRef.current); }, []);
   const ratio = RATIOS.find(r => r[1] === S.ar) || RATIOS[0];
   return h('div', { className: E.has ? '' : 'dim' },
     Sec('Photo', h('div', { className: 'row nodim' }, h(GlassButton, { variant: 'tinted-filled', icon: I('image'), onClick: pickFile(fileRef) }, 'Open photo'), h(GlassButton, { onClick: E.resetAll }, 'Reset')),
-      Pick('Crop aspect', ratio[0], RATIOS.map(([n, v]) => [v, n]), E.setAr),
+      h('div', { className: 'row' }, h(GlassButton, { icon: I('crop'), onClick: () => E.setTool('crop') }, 'Crop')),
+      Pick('Frame aspect', ratio[0], RATIOS.map(([n, v]) => [v, n]), E.setAr),
       h('div', { className: 'row' }, h(GlassButton, { icon: I('rotL'), 'aria-label': 'Rotate left', onClick: () => E.rotate(-1) }), h(GlassButton, { icon: I('rotR'), 'aria-label': 'Rotate right', onClick: () => E.rotate(1) }), h(GlassButton, { icon: I('flip'), 'aria-label': 'Flip', onClick: E.flipPhoto })),
       Sl('Straighten', S.ang, -45, 45, E.straighten, '°')),
+    E.tool === 'crop' && Sec('Crop', h(GlassSegmented, { options: ['Free', '1:1', '4:5', '16:9', '3:2'], value: Math.max(0, CR.findIndex(v => Math.abs(v - E.cropAr) < .001)), onChange: i => E.setCropAr(CR[i]), 'aria-label': 'Crop ratio' }),
+      h('div', { className: 'row' }, h(GlassButton, { icon: I('wand'), onClick: () => E.smartCrop(E.cropAr) }, 'Smart'), h(GlassButton, { onClick: E.cropCancel }, 'Cancel'), h(GlassButton, { variant: 'filled', onClick: E.applyCrop }, 'Apply'))),
+    Sec('Smart tools', h('div', { className: 'stack' },
+      h(GlassButton, { variant: 'tinted-filled', icon: I('wand'), onClick: () => E.aiCutout('remove') }, 'Remove background · AI'),
+      h(GlassButton, { variant: 'tinted', icon: I('wand'), onClick: () => E.aiCutout('blur') }, 'Portrait blur · AI'),
+      h(GlassButton, { icon: I('crop'), onClick: () => E.smartCrop(0) }, 'Smart crop'), h(GlassButton, { icon: I('wand'), onClick: E.autoWB }, 'Auto white balance')),
+      Sl('Magic cutout tolerance', tol, 5, 90, setTol), h(GlassButton, { onClick: () => E.floodCut(tol) }, 'Magic cutout (plain backgrounds)'),
+      Sw('Fill background', !!S.bg, v => E.setBg(v ? '#ffffff' : null)), S.bg && Col('Background color', S.bg, E.setBg)),
     Sec('Presets', h('div', { className: 'chips' }, Object.keys(PRESETS).map(n => h(GlassButton, { key: n, size: 'sm', variant: 'clear', onClick: () => E.preset(n) }, n)))),
     Sec('Adjust', h('canvas', { ref: hcRef, className: 'histo', width: 256, height: 70, 'aria-label': 'Histogram' }),
       h('div', { className: 'row' }, h(GlassButton, { icon: I('wand'), variant: 'tinted', onClick: E.autoEnhance }, 'Auto enhance'), h(GlassButton, { onClick: E.resetAdj }, 'Reset')),
       h(GlassSegmented, { options: names, value: g, onChange: setG, size: 'sm', 'aria-label': 'Adjustment group' }),
       h('div', { className: 'tile' }, GROUPS[names[g]].map(([k, n, a, b]) => Sl(n, A[k], a, b, v => E.adj(k, v))), names[g] === 'Lens' && [Col('Duotone shadows', S.duo[0], v => E.setDuo(0, v)), Col('Duotone lights', S.duo[1], v => E.setDuo(1, v)), Col('Border color', S.bcol, E.setBorderColor)])),
+    Sec('Palette', h('div', { className: 'pal' }, E.pal.map(c => h('button', { key: c, className: 'swatch', style: { background: c }, 'aria-label': 'Use ' + c, onClick: () => { E.setBrush({ color: c }); navigator.clipboard && navigator.clipboard.writeText(c).catch(() => {}); E.toast('Brush color ' + c + ' (copied)'); } }))),
+      h('div', { className: 'row' }, h(GlassButton, { size: 'sm', onClick: E.extractPalette }, 'Re-scan'), h(GlassButton, { size: 'sm', onClick: E.duoFromPal }, 'Duotone from palette'))),
     h('p', { className: 'hint' }, 'Tip: paste or drop images anywhere. Everything stays on your device.'));
 }
 
@@ -65,8 +78,9 @@ function LayersPanel({ imgRef }) {
     Sec('Add', h('div', { className: 'row' }, h(GlassButton, { icon: I('image'), onClick: pickFile(imgRef) }, 'Image'), h(GlassButton, { icon: I('type'), onClick: () => E.addText() }, 'Text')),
       h('div', { className: 'row' }, h(GlassMenu, { icon: I('shape'), 'aria-label': 'Add shape', align: 'start', items: ['rect', 'ellipse', 'line', 'arrow'].map(s => ({ label: s[0].toUpperCase() + s.slice(1), onSelect: () => E.addShape(s) })) }),
         h(GlassMenu, { icon: I('smile'), 'aria-label': 'Add sticker', align: 'start', items: EMOJI.map(e => ({ label: e, onSelect: () => E.addText(e, { name: 'Sticker', bold: false, sh: 6, s: 2 }) })) }))),
-    Sec('Tool', h(GlassSegmented, { options: ['Move', 'Brush', 'Pick color'], value: tools.indexOf(E.tool), onChange: i => E.setTool(tools[i]), 'aria-label': 'Tool' }),
-      E.tool !== 'move' && h('div', { className: 'tile', key: 'b' }, Sl('Brush size', B.size, 2, 160, v => E.setBrush({ size: v })), Col('Color', B.color, v => E.setBrush({ color: v })), Sw('Eraser', B.erase, v => E.setBrush({ erase: v })))),
+    Sec('Tool', h(GlassSegmented, { options: ['Move', 'Brush', 'Pick color'], value: Math.max(0, tools.indexOf(E.tool)), onChange: i => E.setTool(tools[i]), 'aria-label': 'Tool' }),
+      E.tool === 'brush' && h('div', { className: 'tile', key: 'b' }, h(GlassSegmented, { options: ['Paint', 'Erase', 'Mosaic', 'Blur'], value: Math.max(0, MODES.indexOf(B.mode)), onChange: i => E.setBrush({ mode: MODES[i] }), size: 'sm', 'aria-label': 'Brush mode' }), Sl('Brush size', B.size, 2, 160, v => E.setBrush({ size: v })), B.mode === 'paint' && Col('Color', B.color, v => E.setBrush({ color: v }))),
+      E.tool === 'eyedrop' && h('p', { className: 'hint' }, 'Tap the photo to pick a color. It becomes your brush color.')),
     Sec('Layers', h('ul', null, S.layers.length ? [...S.layers].reverse().map(tile) : h('li', { className: 'empty' }, 'No layers yet')), props));
 }
 
@@ -95,18 +109,21 @@ const MQ = '(max-width: 900px)';
 function App() {
   const [, f] = useState(0), [tab, setTab] = useState(0), [pv, setPv] = useState(false), [help, setHelp] = useState(false), [shut, setShut] = useState(false);
   const [dark, setDark] = useState(matchMedia('(prefers-color-scheme: dark)').matches), [mob, setMob] = useState(matchMedia(MQ).matches);
-  const cvRef = useRef(), stRef = useRef(), fileRef = useRef(), imgRef = useRef();
+  const cvRef = useRef(), stRef = useRef(), fileRef = useRef(), imgRef = useRef(), projRef = useRef();
+  useEffect(() => { if (E.tool === 'crop') { setTab(0); setShut(false); } }, [E.tool]);
   useEffect(() => {
     E.onSelect = () => { setTab(1); setShut(false); }; const m = matchMedia(MQ), fn = () => setMob(m.matches); m.addEventListener('change', fn);
     const off = E.on(() => f(x => x + 1)); E.init(cvRef.current, stRef.current, null); return () => { off(); m.removeEventListener('change', fn); };
   }, []);
   const has = E.has, toggleDark = v => { setDark(v); E.theme(v); };
   const menu = [...(mob ? [{ label: 'Preview & export', icon: I('download', 16), onSelect: () => setPv(true), disabled: !has }, { label: 'Before / after split', icon: I('compare', 16), onSelect: E.toggleSplit, disabled: !has }, { label: dark ? 'Light mode' : 'Dark mode', icon: I('moon', 16), onSelect: () => toggleDark(!dark) }] : []),
+    { label: 'Save project', icon: I('download', 16), onSelect: E.saveProject, disabled: !has }, { label: 'Open project…', icon: I('image', 16), onSelect: () => projRef.current && projRef.current.click() },
     { label: 'Copy to clipboard', icon: I('copy', 16), onSelect: E.copy, disabled: !has }, { label: 'Keyboard shortcuts', icon: I('kbd', 16), onSelect: () => setHelp(true) }];
   const scroll = h('div', { className: 'scroll' }, h('div', { style: { display: tab === 0 ? 'block' : 'none' } }, h(EditPanel, { fileRef })), h('div', { style: { display: tab === 1 ? 'block' : 'none' } }, h(LayersPanel, { imgRef })));
   const splitBtn = h(GlassButton, { size: 'sm', icon: I('compare'), variant: E.split != null ? 'tinted-filled' : 'glass', 'aria-label': 'Before and after split', onClick: E.toggleSplit });
   return h(React.Fragment, null,
     h('input', { ref: fileRef, type: 'file', accept: 'image/*', hidden: true, onChange: e => { E.openBase(e.target.files[0]); e.target.value = ''; } }),
+    h('input', { ref: projRef, type: 'file', accept: '.pstudio,application/json', hidden: true, onChange: e => { E.openProject(e.target.files[0]); e.target.value = ''; } }),
     h('input', { ref: imgRef, type: 'file', accept: 'image/*', hidden: true, onChange: e => { E.openOverlay(e.target.files[0]); e.target.value = ''; } }),
     h('header', null, h('div', { className: 'brand' }, h('span', { className: 'logo' }), h('b', null, 'Photo Studio')),
       h('div', { className: 'hl' }, h(GlassButton, { icon: I('undo'), 'aria-label': 'Undo', disabled: !E.canUndo, onClick: E.undo }), h(GlassButton, { icon: I('redo'), 'aria-label': 'Redo', disabled: !E.canRedo, onClick: E.redo })),
@@ -117,12 +134,14 @@ function App() {
         mob ? h(GlassButton, { variant: 'filled', icon: I('download'), 'aria-label': 'Download', disabled: !has, onClick: E.quickSave }) : h(GlassButton, { variant: 'filled', icon: I('download'), disabled: !has, onClick: E.quickSave }, 'Download'),
         h(GlassMenu, { icon: I('more'), 'aria-label': 'More', items: menu }))),
     h('main', null,
-      h('section', { className: 'stage', ref: stRef },
+      h('div', { className: 'stagewrap' }, h('section', { className: 'stage', ref: stRef },
         h('canvas', { ref: cvRef, width: 900, height: 600, tabIndex: 0, 'aria-label': 'Photo canvas', className: has ? '' : 'gone' }),
         !has && h(GlassCard, { className: 'empty', padding: '32px 24px', radius: '30px' }, h('div', { className: 'ring' }), h('h2', null, 'Drop a photo to start'), h('p', null, 'Or paste one from your clipboard. Your images never leave this device.'), h(GlassButton, { variant: 'filled', size: 'lg', onClick: pickFile(fileRef) }, 'Choose photo'))),
+        E.tool === 'crop' && h('div', { className: 'cropbar' }, h(GlassButton, { onClick: E.cropCancel }, 'Cancel'), h(GlassButton, { variant: 'filled', icon: I('wand'), onClick: E.applyCrop }, 'Apply crop')),
+        E.busy && h('div', { className: 'busy-ov' }, h(GlassCard, { padding: '16px 22px', radius: '22px' }, h('div', { className: 'busy-in' }, h('span', { className: 'spin' }), E.busy)))),
       !mob && h(GlassCard, { className: 'side', padding: '6px', radius: '28px' }, scroll)),
     mob ? h('div', { className: 'dock' },
-      h('div', { className: 'mbar' }, h(GlassButton, { size: 'sm', icon: I('fit'), 'aria-label': 'Fit to screen', onClick: () => E.setZoom(1) }), splitBtn, h('span', { className: 'info' }, has ? E.info.split(' · ')[0] : ''), h('span', { className: 'sp' }), h(GlassButton, { size: 'sm', icon: I(shut ? 'up' : 'down'), 'aria-label': shut ? 'Show tools' : 'Hide tools', onClick: () => setShut(!shut) })),
+      h('div', { className: 'mbar' }, h(GlassButton, { size: 'sm', icon: I('fit'), 'aria-label': 'Fit to screen', onClick: () => E.setZoom(1) }), splitBtn, E.tool === 'crop' ? [h(GlassButton, { key: 'c', size: 'sm', onClick: E.cropCancel }, 'Cancel'), h(GlassButton, { key: 'a', size: 'sm', variant: 'filled', onClick: E.applyCrop }, 'Apply crop')] : h('span', { className: 'info' }, has ? E.info.split(' · ')[0] : ''), h('span', { className: 'sp' }), h(GlassButton, { size: 'sm', icon: I(shut ? 'up' : 'down'), 'aria-label': shut ? 'Show tools' : 'Hide tools', onClick: () => setShut(!shut) })),
       h('div', { className: 'dpanel' + (shut ? ' shut' : '') }, h(GlassCard, { className: 'side', padding: '6px', radius: '26px' }, scroll)),
       h(GlassNav, { items: [{ label: 'Edit', icon: I('sliders', 22) }, { label: 'Layers', icon: I('layers', 22) }], activeIndex: tab, onChange: i => { setTab(i); setShut(false); }, showLabels: true }))
     : h(GlassCard, { className: 'bar', padding: '6px 10px', radius: '99px' }, h(GlassButton, { size: 'sm', icon: I('minus'), 'aria-label': 'Zoom out', onClick: () => E.setZoom(E.zoom / 1.2) }),
@@ -132,3 +151,4 @@ function App() {
     h('div', { id: 'toast', className: E.msg ? 'show' : '' }, E.msg));
 }
 createRoot(document.getElementById('root')).render(h(App));
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
